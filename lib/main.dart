@@ -1,20 +1,24 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:intl/intl.dart';
+import 'package:portalgame/homepage.dart';
 import 'package:portalgame/webview_page.dart';
 
 import 'ad_manager.dart';
+import 'ad_services.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-  runApp(SpendMoneyApp());
+  MobileAds.instance.initialize();
+  runApp(PortalApp());
 }
 
-class SpendMoneyApp extends StatelessWidget {
+class PortalApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -25,6 +29,7 @@ class SpendMoneyApp extends StatelessWidget {
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
       home: PortalGameHomePage(),
+     // home: PortalGameHomePage(),
     );
   }
 }
@@ -144,18 +149,47 @@ class _PortalGameHomePageState extends State<PortalGameHomePage> {
     // Item(name: '99. ', image: 'assets/', link: ''),
     // Item(name: '100. ', image: 'assets/', link: ''),
   ];
+
+  late List<Item> filteredItems;
+  late TextEditingController searchController;
   Map<String, int> boughtItemsMap = {};
   late List<BannerAd?> _bannerAds = [];
   late List<bool> _isAdLoaded = [];
   final int maxAds = 10;
-
+  final InterstitialAdService _interstitialAdService = InterstitialAdService();
+  Timer? _interstitialAdTimer;
   @override
   void initState() {
+    searchController = TextEditingController();
+    filteredItems = items;
     _loadBannerAds();
+    _interstitialAdService.loadInterstitialAd();
+    _startInterstitialAdTimer();
     super.initState();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    searchController.addListener(() {
+      filterItems();
+    });
   }
 
+  void _startInterstitialAdTimer() {
+    _interstitialAdTimer = Timer.periodic(Duration(minutes: 5), (timer) {
+      if (_interstitialAdService.isAdLoaded) {
+        _interstitialAdService.showInterstitialAd();
+        _interstitialAdService.loadInterstitialAd(); // Reload the ad
+      } else {
+        print('Interstitial Ad is not ready.');
+      }
+    });
+  }
+  void filterItems() {
+    setState(() {
+      String query = searchController.text.toLowerCase();
+      filteredItems = items.where((item) {
+        return item.name.toLowerCase().contains(query);
+      }).toList();
+    });
+  }
   void _loadBannerAds() {
     for (int i = 0; i < maxAds; i++) {
       BannerAd bannerAd = BannerAd(
@@ -185,17 +219,28 @@ class _PortalGameHomePageState extends State<PortalGameHomePage> {
     for (BannerAd? bannerAd in _bannerAds) {
       bannerAd?.dispose();
     }
+    _interstitialAdTimer?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-            body: Column(
+      body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: TextField(
+              controller: searchController,
+              decoration: InputDecoration(
+                labelText: 'Search games',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ),
           Expanded(
             child: ListView.builder(
-              itemCount: items.length + (_bannerAds.length > 0 ? (_bannerAds.length ~/ 6) : 0),
+              itemCount: filteredItems.length + (_bannerAds.length > 0 ? (_bannerAds.length ~/ 6) : 0),
               itemBuilder: (BuildContext context, int index) {
                 if (_isAdLoaded.isNotEmpty && index != 0 && (index + 1) % 6 == 0) {
                   int adIndex = (index + 1) ~/ 6 - 1;
@@ -205,10 +250,10 @@ class _PortalGameHomePageState extends State<PortalGameHomePage> {
                   );
                 } else {
                   final itemIndex = index - (index ~/ 6);
-                  if (itemIndex >= items.length) {
+                  if (itemIndex >= filteredItems.length) {
                     return SizedBox.shrink();
                   }
-                  final item = items[itemIndex];
+                  final item = filteredItems[itemIndex];
                   return Card(
                     child: ListTile(
                       title: Text(item.name),
@@ -240,12 +285,10 @@ class _PortalGameHomePageState extends State<PortalGameHomePage> {
               },
             ),
           ),
-
         ],
       ),
     );
   }
-
   String _formatCurrency(double amount) {
     var formatCurrency = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp', decimalDigits: 0);
     return formatCurrency.format(amount);
